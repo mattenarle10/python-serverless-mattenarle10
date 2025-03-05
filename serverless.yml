@@ -1,0 +1,114 @@
+org: ecvphdevsmatt
+service: python-serverless-mattenarle10
+
+provider:
+  name: aws
+  runtime: python3.12
+  role: arn:aws:iam::272898481162:role/serverless-app-role
+
+functions:
+  getAllProducts:
+    handler: handlers/product_handler.get_all_products
+    events:
+      - httpApi:
+          path: /products
+          method: get
+  createProduct:
+    handler: handlers/product_handler.create_product
+    events:
+      - httpApi:
+          path: /products
+          method: post
+  getProduct:
+    handler: handlers/product_handler.get_product
+    events:
+      - httpApi:
+          path: /products/{product_id}
+          method: get
+
+  deleteProduct:
+    handler: handlers/product_handler.delete_product
+    events:
+      - httpApi:
+          path: /products/{product_id}
+          method: delete
+
+  modifyProduct:
+    handler: handlers/product_handler.modify_product
+    events:
+      - httpApi:
+          path: /products/{product_id}
+          method: put
+          
+  batchCreateProducts:
+    handler: handlers/product_handler.batch_create_products
+    events:
+      - s3:
+          bucket: products-s3bucket-mattenarle10
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: "for_create/"
+          existing: true
+
+  batchDeleteProducts:
+    handler: handlers/product_handler.batch_delete_products
+    events:
+      - s3:
+          bucket: products-s3bucket-mattenarle10
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: "for_delete/"
+          existing: true
+          
+  receiveMessagesFromSqs:
+    handler: gateways/sqs_gateway.receive_message_from_sqs
+    events:
+      - sqs: arn:aws:sqs:us-east-2:272898481162:products-queue-matt-sqs
+          
+          
+          
+
+resources:
+  Resources:
+  
+    SQSQueueProduct:
+        Type: AWS::SQS::Queue
+        Properties:
+          QueueName: products-queue-matt-sqs
+
+
+    ProductsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: products-matt-2
+        AttributeDefinitions:
+          - AttributeName: product_id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: product_id
+            KeyType: HASH  
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+        BillingMode: PROVISIONED
+
+custom:
+  dynamodb:
+    stages:
+      - dev
+    start:
+      port: 8000
+      inMemory: true
+      migrate: true
+      seed: true
+
+package:
+  exclude:
+    - node_modules/**
+    - test/**
+    - "*.log"
+  include:
+    - gateways/**
+    - handlers/**
+    - models/**
+    - serverless.yml
