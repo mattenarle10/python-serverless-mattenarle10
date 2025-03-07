@@ -5,8 +5,105 @@ provider:
   name: aws
   runtime: python3.12
   role: arn:aws:iam::272898481162:role/serverless-app-role
+  region: us-east-2
+  tracing:
+    apiGateway: true
+    lambda: true
+  environment:
+    TABLE_NAME: ${env:TABLE_NAME}
+    INVENTORY_TABLE_NAME: ${env:INVENTORY_TABLE_NAME}
+    S3_BUCKET_NAME: ${env:S3_BUCKET_NAME}
+    SQS_QUEUE_URL: ${env:SQS_QUEUE_URL}
+    EVENT_BUS_NAME: ${env:EVENT_BUS_NAME}
+    EVENT_BUS_ARN: ${env:EVENT_BUS_ARN}
+  iamRoleStatements:
+    - Effect: "Allow" # xray permissions (required)
+      Action:
+        - "xray:PutTraceSegments"
+        - "xray:PutTelemetryRecords"
+      Resource:
+        - "*"
+    - Effect: "Allow"
+      Action:
+        - "dynamodb:PutItem"
+        - "dynamodb:Query"
+        - "dynamodb:GetItem"
+        - "dynamodb:UpdateItem"
+        - "dynamodb:DeleteItem"
+        - "dynamodb:BatchWriteItem"
+        - "dynamodb:Scan"
+      Resource:
+        - "arn:aws:dynamodb:${self:provider.region}:272898481162:table/${env:TABLE_NAME}"
+        - "arn:aws:dynamodb:${self:provider.region}:272898481162:table/${env:INVENTORY_TABLE_NAME}"
+    - Effect: "Allow"
+      Action:
+        - "s3:GetObject"
+        - "s3:PutObject"
+        - "s3:ListBucket"
+      Resource:
+        - "arn:aws:s3:::${env:S3_BUCKET_NAME}/*"
+        - "arn:aws:s3:::${env:S3_BUCKET_NAME}"
+    - Effect: "Allow"
+      Action:
+        - "sqs:SendMessage"
+        - "sqs:ReceiveMessage"
+        - "sqs:DeleteMessage"
+        - "sqs:GetQueueAttributes"
+      Resource:
+        - "arn:aws:sqs:${self:provider.region}:272898481162:products-queue-matt-sqs"
+    - Effect: "Allow"
+      Action:
+        - "events:PutRule"
+        - "events:PutTargets"
+        - "events:DeleteRule"
+        - "events:RemoveTargets"
+        - "events:PutEvents"
+        - "events:DescribeRule"
+        - "events:ListEventBuses"
+        - "events:ListRules"
+        - "events:ListTargetsByRule"
+        - "events:EnableRule"
+        - "events:DisableRule"
+      Resource:
+        - "arn:aws:events:${self:provider.region}:272898481162:rule/*"
+        - "arn:aws:events:${self:provider.region}:272898481162:event-bus/${env:EVENT_BUS_NAME}"
+        - "arn:aws:events:${self:provider.region}:272898481162:event-bus/default"
+    - Effect: "Allow"
+      Action:
+        - "lambda:InvokeFunction"
+      Resource:
+        - "arn:aws:lambda:${self:provider.region}:272898481162:function:python-serverless-mattenarle10-dev-checkLowInventory"
 
 functions:
+  # EventBridge functions
+  setupInventoryCheck:
+    handler: handlers/event_handler.setup_inventory_check
+    events:
+      - httpApi:
+          path: /events/inventory-check/setup
+          method: post
+
+  checkLowInventory:
+    handler: handlers/event_handler.check_low_inventory
+    events:
+      - httpApi:
+          path: /events/inventory-check
+          method: post
+      - eventBridge:
+          schedule: rate(1 day)
+          name: matt-inventory-check-v2
+          description: "Check inventory levels daily for matt"
+          enabled: true
+          input:
+            threshold: 10
+
+  testEventTrigger:
+    handler: handlers/event_handler.test_event_trigger
+    events:
+      - httpApi:
+          path: /events/test-trigger
+          method: post
+
   getAllProducts:
     handler: handlers/product_handler.get_all_products
     events:
@@ -25,21 +122,18 @@ functions:
       - httpApi:
           path: /products/{product_id}
           method: get
-
   deleteProduct:
     handler: handlers/product_handler.delete_product
     events:
       - httpApi:
           path: /products/{product_id}
           method: delete
-
   modifyProduct:
     handler: handlers/product_handler.modify_product
     events:
       - httpApi:
           path: /products/{product_id}
           method: put
-          
   batchCreateProducts:
     handler: handlers/product_handler.batch_create_products
     events:
@@ -49,7 +143,6 @@ functions:
           rules:
             - prefix: "for_create/"
           existing: true
-
   batchDeleteProducts:
     handler: handlers/product_handler.batch_delete_products
     events:
@@ -59,23 +152,52 @@ functions:
           rules:
             - prefix: "for_delete/"
           existing: true
-          
   receiveMessagesFromSqs:
     handler: gateways/sqs_gateway.receive_message_from_sqs
     events:
       - sqs: arn:aws:sqs:us-east-2:272898481162:products-queue-matt-sqs
-          
-          
-          
+  addStocksToProduct:
+    handler: handlers/product_handler.add_stocks_to_product
+    events:
+      - httpApi:
+          path: /inventory
+          method: post
 
 resources:
   Resources:
-  
-    SQSQueueProduct:
-        Type: AWS::SQS::Queue
-        Properties:
-          QueueName: products-queue-matt-sqs
+    # EventBridge Rules
+    ProductCreatedRule:
+      Type: AWS::Events::Rule
+      Properties:
+        Name: matt-product-created
+        EventBusName: ${env:EVENT_BUS_NAME}
+        EventPattern:
+          source: ["custom.products.mattenarle"]
+          detail-type: ["product-created"]
+        State: ENABLED
+        Targets:
+          - Arn: !GetAtt SQSQueueProduct.Arn
+            Id: "ProductCreatedTarget"
+            RoleArn: ${self:provider.role}
 
+    ProductLowStockRule:
+      Type: AWS::Events::Rule
+      Properties:
+        Name: matt-lowstock
+        EventBusName: ${env:EVENT_BUS_NAME}
+        EventPattern:
+          source: ["custom.inventory.mattenarle"]
+          detail-type: ["low-stock-alert"]
+        State: ENABLED
+        Targets:
+          - Arn: !GetAtt SQSQueueProduct.Arn
+            Id: "LowStockAlertTarget"
+            RoleArn: ${self:provider.role}
+
+    SQSQueueProduct:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: products-queue-matt-sqs
 
     ProductsTable:
       Type: AWS::DynamoDB::Table
@@ -86,11 +208,28 @@ resources:
             AttributeType: S
         KeySchema:
           - AttributeName: product_id
-            KeyType: HASH  
+            KeyType: HASH
         ProvisionedThroughput:
-          ReadCapacityUnits: 5
-          WriteCapacityUnits: 5
-        BillingMode: PROVISIONED
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+
+    ProductInventory:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: product_inventory-matt-2
+        AttributeDefinitions:
+          - AttributeName: product_id
+            AttributeType: S
+          - AttributeName: datetime
+            AttributeType: S
+        KeySchema:
+          - AttributeName: product_id
+            KeyType: HASH
+          - AttributeName: datetime
+            KeyType: RANGE
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
 
 custom:
   dynamodb:
@@ -101,6 +240,15 @@ custom:
       inMemory: true
       migrate: true
       seed: true
+  prune:
+    automatic: true
+    number: 3
+  eventBridge:
+    useCloudFormation: false
+
+plugins:
+  - serverless-python-requirements
+  - serverless-offline
 
 package:
   exclude:
@@ -111,4 +259,6 @@ package:
     - gateways/**
     - handlers/**
     - models/**
+    - utils/**
     - serverless.yml
+    - requirements.txt

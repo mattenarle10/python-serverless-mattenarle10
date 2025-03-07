@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>BYD EV Cars Management System</title>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <header class="bg-blue-600 text-white p-4 rounded-lg mb-6">
+            <h1 class="text-2xl font-bold">BYD EV Cars Management System</h1>
+        </header>
+
+        <main class="space-y-8">
+            <!-- Products List Section -->
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <h2 class="text-xl font-semibold mb-4">Products</h2>
+                <button id="loadProducts" class="bg-blue-500 text-white px-4 py-2 rounded mb-4">Load All Products</button>
+                <div id="productsList" class="mt-4 overflow-x-auto">
+                    <table class="min-w-full bg-white">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="py-2 px-4 border-b text-left">ID</th>
+                                <th class="py-2 px-4 border-b text-left">Name</th>
+                                <th class="py-2 px-4 border-b text-left">Price</th>
+                                <th class="py-2 px-4 border-b text-left">Quantity</th>
+                                <th class="py-2 px-4 border-b text-left">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="productsTableBody">
+                            <!-- Products will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Create Product Form -->
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <h2 class="text-xl font-semibold mb-4">Create New Product</h2>
+                <form id="createProductForm" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Product ID</label>
+                        <input type="text" id="productId" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Product Name</label>
+                        <input type="text" id="productName" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Price</label>
+                        <input type="number" id="productPrice" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Quantity</label>
+                        <input type="number" id="productQuantity" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" required>
+                    </div>
+                    <button type="submit" class="bg-green-500 text-white px-4 py-2 rounded">Create Product</button>
+                </form>
+            </div>
+
+            <!-- Add Stock Form -->
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <h2 class="text-xl font-semibold mb-4">Add Stock</h2>
+                <form id="addStockForm" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Product ID</label>
+                        <input type="text" id="stockProductId" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Quantity to Add</label>
+                        <input type="number" id="stockQuantity" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Remarks</label>
+                        <textarea id="stockRemarks" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border"></textarea>
+                    </div>
+                    <button type="submit" class="bg-yellow-500 text-white px-4 py-2 rounded">Add Stock</button>
+                </form>
+            </div>
+        </main>
+
+        <footer class="mt-8 text-center text-gray-600">
+            <p>© 2025 Inventory Management System</p>
+        </footer>
+    </div>
+
+    <script>
+        // API base URL from your serverless deployment
+        const API_URL = "https://asjy4j9f4h.execute-api.us-east-2.amazonaws.com";
+        
+        // Utility function for API calls
+        async function callApi(endpoint, method, data = null) {
+            const url = API_URL + endpoint;
+            console.log(`Making ${method} request to: ${url}`);
+            
+            const options = {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            };
+            
+            if (data) {
+                options.body = JSON.stringify(data);
+            }
+            
+            try {
+                const response = await fetch(url, options);
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status} ${response.statusText}`);
+                }
+                return await response.json();
+            } catch (error) {
+                console.error(`API call failed: ${error.message}`);
+                throw error;
+            }
+        }
+
+        // Load all products
+        document.getElementById('loadProducts').addEventListener('click', async () => {
+            try {
+                const products = await callApi('/products', 'GET');
+                const tableBody = document.getElementById('productsTableBody');
+                tableBody.innerHTML = '';
+                
+                products.forEach(product => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td class="py-2 px-4 border-b">${product.product_id}</td>
+                        <td class="py-2 px-4 border-b">${product.product_name}</td>
+                        <td class="py-2 px-4 border-b">$${product.price}</td>
+                        <td class="py-2 px-4 border-b">${product.quantity}</td>
+                        <td class="py-2 px-4 border-b">
+                            <button class="bg-red-500 text-white px-2 py-1 rounded text-xs" onclick="deleteProduct('${product.product_id}')">Delete</button>
+                        </td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+            } catch (error) {
+                console.error('Error loading products:', error);
+                alert('Failed to load products. See console for details.');
+            }
+        });
+
+        // Create new product
+        document.getElementById('createProductForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const productData = {
+                product_id: document.getElementById('productId').value,
+                product_name: document.getElementById('productName').value,
+                price: parseFloat(document.getElementById('productPrice').value),
+                quantity: parseInt(document.getElementById('productQuantity').value)
+            };
+            
+            try {
+                const result = await callApi('/products', 'POST', productData);
+                alert('Product created successfully!');
+                document.getElementById('createProductForm').reset();
+                document.getElementById('loadProducts').click(); // Reload the products list
+            } catch (error) {
+                console.error('Error creating product:', error);
+                alert('Failed to create product. See console for details.');
+            }
+        });
+
+        // Add stock to product
+        document.getElementById('addStockForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const stockData = {
+                product_id: document.getElementById('stockProductId').value,
+                quantity: parseInt(document.getElementById('stockQuantity').value),
+                remarks: document.getElementById('stockRemarks').value || 'Stock addition'
+            };
+            
+            try {
+                const result = await callApi('/inventory', 'POST', stockData);
+                alert('Stock added successfully!');
+                document.getElementById('addStockForm').reset();
+                document.getElementById('loadProducts').click(); // Reload the products list
+            } catch (error) {
+                console.error('Error adding stock:', error);
+                alert('Failed to add stock. See console for details.');
+            }
+        });
+
+        // Delete product function
+        async function deleteProduct(productId) {
+            if (confirm(`Are you sure you want to delete product ${productId}?`)) {
+                try {
+                    const result = await callApi(`/products/${productId}`, 'DELETE');
+                    alert('Product deleted successfully!');
+                    document.getElementById('loadProducts').click(); // Reload the products list
+                } catch (error) {
+                    console.error('Error deleting product:', error);
+                    alert('Failed to delete product. See console for details.');
+                }
+            }
+        }
+    </script>
+</body>
+</html>

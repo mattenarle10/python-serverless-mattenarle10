@@ -1,114 +1,224 @@
+from datetime import datetime, timezone
 import boto3
-from decimal import Decimal
 import json
+from dotenv import load_dotenv
+import os
+from utils.logger import logger
+from utils.decimal_encoder import DecimalEncoder
 
-def get_dynamodb_items(table_name):
-    dynamodb = boto3.resource('dynamodb', region_name='us-east-2')
-    table = dynamodb.Table(table_name)
-    response = table.scan()
-    return response.get('Items', [])
+load_dotenv()
+region_name = os.getenv("AWS_REGION")
 
-def create_product_in_dynamodb(table_name, product_name, quantity, price, product_id):
-    dynamodb = boto3.resource('dynamodb', region_name='us-east-2')
-    table = dynamodb.Table(table_name)
-    
-    try:
-        table.put_item(
-            Item={
-                'product_id': product_id,
-                'product_name': product_name,
-                'quantity': quantity,
-                'price': price,
+
+class DynamoGateway:
+    def __init__(self, table_name: str, region_name: str = region_name):
+        logger.info(f"Initializing DynamoGateway with table: {table_name}, region: {region_name}")
+        self.table_name = table_name
+        self.dynamodb = boto3.resource("dynamodb", region_name=region_name)
+        self.table = self.dynamodb.Table(self.table_name)
+        logger.info(f"DynamoDB table initialized: {self.table.table_name}")
+
+    def get_all_items(self):
+        try:
+            logger.info(f"Fetching all items from table: {self.table_name}")
+            items = []
+            response = self.table.scan()
+            items.extend(response.get("Items", []))
+
+            while "LastEvaluatedKey" in response:
+                response = self.table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
+                items.extend(response.get("Items", []))
+
+            logger.info(f"Fetched {len(items)} items from table: {self.table_name}")
+            return items
+        except Exception as e:
+            error_msg = f"Error fetching items: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg)
+
+    def create_item(self, item: dict):
+        try:
+            logger.info(f"Creating item in table: {self.table_name}")
+            logger.debug(f"Item preview: {json.dumps(item, indent=2, cls=DecimalEncoder)}")
+            self.table.put_item(Item=item)
+            logger.info(f"Item created successfully in table: {self.table_name}")
+            return {
+                "statusCode": 200,
+                "body": json.dumps({"message": "Item created successfully"}, cls=DecimalEncoder),
             }
-        )
-        return {
-            'statusCode': 200,
-            'body': json.dumps({'message': 'Product created successfully'})
-        }
-    except Exception as e:
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'message': 'Failed to create product', 'error': str(e)})
-        }
-
-def get_product_from_dynamodb(table_name, product_id):
-    dynamodb = boto3.resource('dynamodb', region_name='us-east-2')
-    table = dynamodb.Table(table_name)
-    try:
-        response = table.get_item(Key={'product_id': product_id})
-        return response.get('Item', None)
-    except Exception as e:
-        return None
-
-def delete_product_from_dynamodb(table_name, product_id):
-    dynamodb = boto3.resource('dynamodb', region_name='us-east-2')
-    table = dynamodb.Table(table_name)
-    
-    try:
-        table.delete_item(Key={'product_id': product_id})
-        return {
-            'statusCode': 200,
-            'body': json.dumps({'message': f'Product {product_id} deleted successfully'})
-        }
-    except Exception as e:
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'message': 'Failed to delete product', 'error': str(e)})
-        }
-
-def modify_product_in_dynamodb(table_name, product_id, product_name, quantity, price):
-    dynamodb = boto3.resource('dynamodb', region_name='us-east-2')
-    table = dynamodb.Table(table_name)
-    
-    try:
-        table.update_item(
-            Key={'product_id': product_id},
-            UpdateExpression="SET product_name = :product_name, quantity = :quantity, price = :price",
-            ExpressionAttributeValues={
-                ':product_name': product_name,
-                ':quantity': quantity,
-                ':price': price
+        except Exception as e:
+            error_msg = f"Failed to create item: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {
+                "statusCode": 500,
+                "body": json.dumps({"message": "Failed to create item", "error": str(e)}, cls=DecimalEncoder),
             }
-        )
-        return {
-            'statusCode': 200,
-            'body': json.dumps({'message': 'Product updated successfully'})
-        }
-    except Exception as e:
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'message': 'Failed to update product', 'error': str(e)})
-        }
 
-def batch_create_products_in_dynamodb(table_name, products_data):
-    dynamodb = boto3.resource('dynamodb', region_name='us-east-2')
-    table = dynamodb.Table(table_name)
-    
-    with table.batch_writer() as batch:
-        for product in products_data:
-            batch.put_item(
+    def get_item(self, key: dict):
+        try:
+            logger.info(f"Fetching item from table: {self.table_name} with key: {key}")
+            response = self.table.get_item(Key=key)
+            item = response.get("Item", None)
+            logger.info(f"Fetched item from table: {self.table_name} with key: {key}")
+            return item
+        except Exception as e:
+            error_msg = f"Error fetching item: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg)
+
+    def delete_item(self, key: dict):
+        try:
+            logger.info(f"Deleting item from table: {self.table_name} with key: {key}")
+            self.table.delete_item(Key=key)
+            logger.info(f"Item deleted successfully from table: {self.table_name} with key: {key}")
+            return {
+                "statusCode": 200,
+                "body": json.dumps({"message": "Item deleted successfully"}, cls=DecimalEncoder),
+            }
+        except Exception as e:
+            error_msg = f"Failed to delete item: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {
+                "statusCode": 500,
+                "body": json.dumps({"message": "Failed to delete item", "error": str(e)}, cls=DecimalEncoder),
+            }
+
+    def update_item(self, key: dict, update_expression: str, expression_values: dict):
+        try:
+            logger.info(f"Updating item in table: {self.table_name} with key: {key}")
+            logger.debug(f"Update expression: {update_expression}")
+            logger.debug(f"Expression values: {json.dumps(expression_values, indent=2, cls=DecimalEncoder)}")
+            self.table.update_item(
+                Key=key,
+                UpdateExpression=update_expression,
+                ExpressionAttributeValues=expression_values,
+            )
+            logger.info(f"Item updated successfully in table: {self.table_name} with key: {key}")
+            return {
+                "statusCode": 200,
+                "body": json.dumps({"message": "Item updated successfully"}, cls=DecimalEncoder),
+            }
+        except Exception as e:
+            error_msg = f"Failed to update item: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {
+                "statusCode": 500,
+                "body": json.dumps({"message": "Failed to update item", "error": str(e)}, cls=DecimalEncoder),
+            }
+
+    def batch_create_items(self, items: list):
+        try:
+            logger.info(f"Starting batch create operation for {len(items)} items in table {self.table_name}")
+            logger.debug(f"First item preview: {json.dumps(items[0] if items else 'No items', indent=2, cls=DecimalEncoder)}")
+            
+            successful_items = 0
+            failed_items = []
+            
+            with self.table.batch_writer() as batch:
+                for idx, item in enumerate(items, 1):
+                    try:
+                        logger.debug(f"Writing item {idx}/{len(items)}: {item.get('product_id', 'unknown')}")
+                        batch.put_item(Item=item)
+                        successful_items += 1
+                    except Exception as item_error:
+                        logger.error(f"Failed to write item {idx}: {str(item_error)}")
+                        failed_items.append({"item": item, "error": str(item_error)})
+            
+            if failed_items:
+                logger.warning(f"Batch create completed with {len(failed_items)} failures")
+                logger.debug(f"Failed items: {json.dumps(failed_items, indent=2, cls=DecimalEncoder)}")
+            
+            logger.info(f"Batch create completed. Success: {successful_items}, Failed: {len(failed_items)}")
+            
+            return {
+                "statusCode": 200,
+                "body": json.dumps({
+                    "message": f"{successful_items} items created successfully",
+                    "failed_items": len(failed_items),
+                    "details": failed_items if failed_items else None
+                }, cls=DecimalEncoder)
+            }
+        except Exception as e:
+            error_msg = f"Error in batch create: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg)
+
+    def batch_delete_items(self, keys: list):
+        try:
+            logger.info(f"Starting batch delete operation for {len(keys)} items in table {self.table_name}")
+            logger.debug(f"First key preview: {json.dumps(keys[0] if keys else 'No keys', indent=2, cls=DecimalEncoder)}")
+            
+            successful_items = 0
+            failed_items = []
+            
+            with self.table.batch_writer() as batch:
+                for idx, key in enumerate(keys, 1):
+                    try:
+                        logger.debug(f"Deleting item {idx}/{len(keys)}: {key.get('product_id', 'unknown')}")
+                        batch.delete_item(Key=key)
+                        successful_items += 1
+                    except Exception as item_error:
+                        logger.error(f"Failed to delete item {idx}: {str(item_error)}")
+                        failed_items.append({"key": key, "error": str(item_error)})
+            
+            if failed_items:
+                logger.warning(f"Batch delete completed with {len(failed_items)} failures")
+                logger.debug(f"Failed items: {json.dumps(failed_items, indent=2, cls=DecimalEncoder)}")
+            
+            logger.info(f"Batch delete completed. Success: {successful_items}, Failed: {len(failed_items)}")
+            
+            return {
+                "statusCode": 200,
+                "body": json.dumps({
+                    "message": f"{successful_items} items deleted successfully",
+                    "failed_items": len(failed_items),
+                    "details": failed_items if failed_items else None
+                }, cls=DecimalEncoder)
+            }
+        except Exception as e:
+            error_msg = f"Error in batch delete: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg)
+        
+    def add_stock_entry(self, product_id, quantity, remarks):
+        """Adds a stock entry for a product with a timestamp."""
+        timestamp = datetime.now(timezone.utc).isoformat() 
+
+        try:
+            logger.info(f"Adding stock entry for product: {product_id}")
+            logger.debug(f"Stock entry details: product_id={product_id}, quantity={quantity}, remarks={remarks}")
+            self.table.put_item(
                 Item={
-                    'product_id': product['product_id'],
-                    'product_name': product['product_name'],
-                    'quantity': product['quantity'],
-                    'price': product['price']
+                    "product_id": product_id,
+                    "datetime": timestamp,
+                    "quantity": quantity,
+                    "remarks": remarks,
                 }
             )
-    return {
-        'statusCode': 200,
-        'body': json.dumps({'message': f'{len(products_data)} products created successfully'})
-    }
-
-def batch_delete_products_from_dynamodb(table_name, product_ids):
-    dynamodb = boto3.resource('dynamodb', region_name='us-east-2')
-    table = dynamodb.Table(table_name)
-    
-    with table.batch_writer() as batch:
-        for product_id in product_ids:
-            batch.delete_item(Key={'product_id': product_id})
-    
-    return {
-        'statusCode': 200,
-        'body': json.dumps({'message': f'{len(product_ids)} products deleted successfully'})
-    }
-
+            logger.info(f"Stock entry added successfully for product: {product_id}")
+            return {
+                "statusCode": 200,
+                "body": json.dumps({"message": "Stock entry added successfully"}, cls=DecimalEncoder),
+            }
+        except Exception as e:
+            error_msg = f"Failed to add stock entry: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {
+                "statusCode": 500,
+                "body": json.dumps({"message": "Failed to add stock entry", "error": str(e)}, cls=DecimalEncoder),
+            }
+        
+    def get_stock_entries(self, product_id):
+        """Fetch stock entries for a given product_id."""
+        try:
+            logger.info(f"Fetching stock entries for product: {product_id}")
+            response = self.table.query(
+                KeyConditionExpression=boto3.dynamodb.conditions.Key("product_id").eq(product_id)
+            )
+            items = response.get("Items", [])
+            logger.info(f"Fetched {len(items)} stock entries for product: {product_id}")
+            return items
+        except Exception as e:
+            error_msg = f"Error fetching stock entries: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg)
