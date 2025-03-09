@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdn.tailwindcss.com"></script>
-    <title>BYD EV Cars Management System</title>
+    <title>EV Cars Management System</title>
 </head>
 <body class="bg-gray-100">
     <div class="container mx-auto px-4 py-8">
         <header class="bg-blue-600 text-white p-4 rounded-lg mb-6">
-            <h1 class="text-2xl font-bold">BYD EV Cars Management System</h1>
+            <h1 class="text-2xl font-bold">EV Cars Management System</h1>
         </header>
 
         <main class="space-y-8">
@@ -86,8 +86,8 @@
     </div>
 
     <script>
-        // API base URL from your serverless deployment
-        const API_URL = "https://asjy4j9f4h.execute-api.us-east-2.amazonaws.com";
+        // Using Serverless Offline endpoint for local development
+        const API_URL = "http://localhost:3000";
         
         // Utility function for API calls
         async function callApi(endpoint, method, data = null) {
@@ -107,10 +107,22 @@
             
             try {
                 const response = await fetch(url, options);
+                console.log(`Response status: ${response.status} ${response.statusText}`);
+                
                 if (!response.ok) {
                     throw new Error(`API error: ${response.status} ${response.statusText}`);
                 }
-                return await response.json();
+                
+                const responseText = await response.text();
+                console.log(`Response body: ${responseText}`);
+                
+                try {
+                    return JSON.parse(responseText);
+                } catch (parseError) {
+                    console.error(`Error parsing JSON: ${parseError.message}`);
+                    console.error(`Raw response: ${responseText}`);
+                    throw new Error(`Invalid JSON response: ${parseError.message}`);
+                }
             } catch (error) {
                 console.error(`API call failed: ${error.message}`);
                 throw error;
@@ -120,26 +132,82 @@
         // Load all products
         document.getElementById('loadProducts').addEventListener('click', async () => {
             try {
-                const products = await callApi('/products', 'GET');
+                const response = await callApi('/products', 'GET');
+                console.log('Products response:', response);
+                
+                // Handle different response formats
+                let products = [];
+                if (Array.isArray(response)) {
+                    products = response;
+                } else if (response.items) {
+                    // The API is returning data in an object with an items array
+                    products = response.items;
+                } else if (response.Items) {
+                    products = response.Items;
+                } else if (response.body) {
+                    // Try to parse body if it's a string
+                    if (typeof response.body === 'string') {
+                        try {
+                            const parsedBody = JSON.parse(response.body);
+                            if (parsedBody.items) {
+                                products = parsedBody.items;
+                            } else if (Array.isArray(parsedBody)) {
+                                products = parsedBody;
+                            } else {
+                                products = [parsedBody];
+                            }
+                        } catch (e) {
+                            console.error('Error parsing response body:', e);
+                        }
+                    } else if (Array.isArray(response.body)) {
+                        products = response.body;
+                    } else if (response.body && response.body.items) {
+                        products = response.body.items;
+                    } else {
+                        products = [response.body];
+                    }
+                }
+                
+                console.log('Processed products:', products);
+                
+                if (!Array.isArray(products)) {
+                    throw new Error('Invalid products data format: ' + JSON.stringify(response));
+                }
+                
                 const tableBody = document.getElementById('productsTableBody');
                 tableBody.innerHTML = '';
                 
+                if (products.length === 0) {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `<td colspan="5" class="py-4 px-4 text-center">No products found</td>`;
+                    tableBody.appendChild(row);
+                    return;
+                }
+                
                 products.forEach(product => {
+                    // Ensure values are properly formatted
+                    const productId = product.product_id || '';
+                    const productName = product.product_name || '';
+                    const price = typeof product.price === 'object' && product.price !== null ? 
+                                 product.price.toString() : product.price || '0';
+                    const quantity = typeof product.quantity === 'object' && product.quantity !== null ? 
+                                    product.quantity.toString() : product.quantity || '0';
+                    
                     const row = document.createElement('tr');
                     row.innerHTML = `
-                        <td class="py-2 px-4 border-b">${product.product_id}</td>
-                        <td class="py-2 px-4 border-b">${product.product_name}</td>
-                        <td class="py-2 px-4 border-b">$${product.price}</td>
-                        <td class="py-2 px-4 border-b">${product.quantity}</td>
+                        <td class="py-2 px-4 border-b">${productId}</td>
+                        <td class="py-2 px-4 border-b">${productName}</td>
+                        <td class="py-2 px-4 border-b">$${price}</td>
+                        <td class="py-2 px-4 border-b">${quantity}</td>
                         <td class="py-2 px-4 border-b">
-                            <button class="bg-red-500 text-white px-2 py-1 rounded text-xs" onclick="deleteProduct('${product.product_id}')">Delete</button>
+                            <button class="bg-red-500 text-white px-2 py-1 rounded text-xs" onclick="deleteProduct('${productId}')">Delete</button>
                         </td>
                     `;
                     tableBody.appendChild(row);
                 });
             } catch (error) {
                 console.error('Error loading products:', error);
-                alert('Failed to load products. See console for details.');
+                alert('Failed to load products. See console for details: ' + error.message);
             }
         });
 
@@ -147,21 +215,26 @@
         document.getElementById('createProductForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            const productData = {
-                product_id: document.getElementById('productId').value,
-                product_name: document.getElementById('productName').value,
-                price: parseFloat(document.getElementById('productPrice').value),
-                quantity: parseInt(document.getElementById('productQuantity').value)
-            };
-            
             try {
+                // Ensure numeric values are properly formatted as strings to avoid Decimal serialization issues
+                const productData = {
+                    product_id: document.getElementById('productId').value,
+                    product_name: document.getElementById('productName').value,
+                    price: document.getElementById('productPrice').value,  // Send as string
+                    quantity: document.getElementById('productQuantity').value  // Send as string
+                };
+                
+                console.log('Creating product with data:', productData);
+                
                 const result = await callApi('/products', 'POST', productData);
+                console.log('Create product response:', result);
+                
                 alert('Product created successfully!');
                 document.getElementById('createProductForm').reset();
                 document.getElementById('loadProducts').click(); // Reload the products list
             } catch (error) {
                 console.error('Error creating product:', error);
-                alert('Failed to create product. See console for details.');
+                alert('Failed to create product. See console for details: ' + error.message);
             }
         });
 
@@ -169,33 +242,46 @@
         document.getElementById('addStockForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            const stockData = {
-                product_id: document.getElementById('stockProductId').value,
-                quantity: parseInt(document.getElementById('stockQuantity').value),
-                remarks: document.getElementById('stockRemarks').value || 'Stock addition'
-            };
-            
             try {
+                // Ensure numeric values are properly formatted as strings to avoid Decimal serialization issues
+                const stockData = {
+                    product_id: document.getElementById('stockProductId').value,
+                    quantity: document.getElementById('stockQuantity').value, // Send as string
+                    remarks: document.getElementById('stockRemarks').value || 'Stock addition'
+                };
+                
+                console.log('Adding stock with data:', stockData);
+                
                 const result = await callApi('/inventory', 'POST', stockData);
+                console.log('Add stock response:', result);
+                
                 alert('Stock added successfully!');
                 document.getElementById('addStockForm').reset();
                 document.getElementById('loadProducts').click(); // Reload the products list
             } catch (error) {
                 console.error('Error adding stock:', error);
-                alert('Failed to add stock. See console for details.');
+                alert('Failed to add stock. See console for details: ' + error.message);
             }
         });
 
         // Delete product function
         async function deleteProduct(productId) {
+            if (!productId) {
+                alert('Invalid product ID');
+                return;
+            }
+            
             if (confirm(`Are you sure you want to delete product ${productId}?`)) {
                 try {
+                    console.log(`Deleting product: ${productId}`);
                     const result = await callApi(`/products/${productId}`, 'DELETE');
+                    console.log('Delete product response:', result);
+                    
                     alert('Product deleted successfully!');
                     document.getElementById('loadProducts').click(); // Reload the products list
                 } catch (error) {
                     console.error('Error deleting product:', error);
-                    alert('Failed to delete product. See console for details.');
+                    alert('Failed to delete product. See console for details: ' + error.message);
                 }
             }
         }
