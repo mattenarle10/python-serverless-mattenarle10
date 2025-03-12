@@ -44,6 +44,9 @@ class DynamoGateway:
             logger.info(f"Item created successfully in table: {self.table_name}")
             return {
                 "statusCode": 200,
+                "headers": {
+                    "Content-Type": "application/json"
+                },
                 "body": json.dumps({"message": "Item created successfully"}, cls=DecimalEncoder),
             }
         except Exception as e:
@@ -51,6 +54,9 @@ class DynamoGateway:
             logger.error(error_msg, exc_info=True)
             return {
                 "statusCode": 500,
+                "headers": {
+                    "Content-Type": "application/json"
+                },
                 "body": json.dumps({"message": "Failed to create item", "error": str(e)}, cls=DecimalEncoder),
             }
 
@@ -73,6 +79,9 @@ class DynamoGateway:
             logger.info(f"Item deleted successfully from table: {self.table_name} with key: {key}")
             return {
                 "statusCode": 200,
+                "headers": {
+                    "Content-Type": "application/json"
+                },
                 "body": json.dumps({"message": "Item deleted successfully"}, cls=DecimalEncoder),
             }
         except Exception as e:
@@ -80,6 +89,9 @@ class DynamoGateway:
             logger.error(error_msg, exc_info=True)
             return {
                 "statusCode": 500,
+                "headers": {
+                    "Content-Type": "application/json"
+                },
                 "body": json.dumps({"message": "Failed to delete item", "error": str(e)}, cls=DecimalEncoder),
             }
 
@@ -96,6 +108,9 @@ class DynamoGateway:
             logger.info(f"Item updated successfully in table: {self.table_name} with key: {key}")
             return {
                 "statusCode": 200,
+                "headers": {
+                    "Content-Type": "application/json"
+                },
                 "body": json.dumps({"message": "Item updated successfully"}, cls=DecimalEncoder),
             }
         except Exception as e:
@@ -103,6 +118,9 @@ class DynamoGateway:
             logger.error(error_msg, exc_info=True)
             return {
                 "statusCode": 500,
+                "headers": {
+                    "Content-Type": "application/json"
+                },
                 "body": json.dumps({"message": "Failed to update item", "error": str(e)}, cls=DecimalEncoder),
             }
 
@@ -132,6 +150,9 @@ class DynamoGateway:
             
             return {
                 "statusCode": 200,
+                "headers": {
+                    "Content-Type": "application/json"
+                },
                 "body": json.dumps({
                     "message": f"{successful_items} items created successfully",
                     "failed_items": len(failed_items),
@@ -169,6 +190,9 @@ class DynamoGateway:
             
             return {
                 "statusCode": 200,
+                "headers": {
+                    "Content-Type": "application/json"
+                },
                 "body": json.dumps({
                     "message": f"{successful_items} items deleted successfully",
                     "failed_items": len(failed_items),
@@ -198,6 +222,9 @@ class DynamoGateway:
             logger.info(f"Stock entry added successfully for product: {product_id}")
             return {
                 "statusCode": 200,
+                "headers": {
+                    "Content-Type": "application/json"
+                },
                 "body": json.dumps({"message": "Stock entry added successfully"}, cls=DecimalEncoder),
             }
         except Exception as e:
@@ -220,5 +247,60 @@ class DynamoGateway:
             return items
         except Exception as e:
             error_msg = f"Error fetching stock entries: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg)
+            
+    def search_products_by_name(self, product_name):
+        """Search for products by name using a scan with filter expression and in-memory filtering."""
+        try:
+            logger.info(f"Searching for products with name containing: {product_name}")
+            # Convert to lowercase for case-insensitive search
+            search_term = product_name.lower().strip()
+            
+            # Get all products first, then filter in memory for case-insensitive matching
+            # This is more reliable than depending on DynamoDB's case-sensitive filtering
+            logger.info(f"Getting all products to perform case-insensitive search")
+            response = self.table.scan()
+            all_products = response.get("Items", [])
+            
+            # Continue scanning if there are more items (pagination)
+            while 'LastEvaluatedKey' in response:
+                response = self.table.scan(
+                    ExclusiveStartKey=response['LastEvaluatedKey']
+                )
+                all_products.extend(response.get("Items", []))
+            
+            logger.info(f"Retrieved {len(all_products)} total products for filtering")
+            
+            # Perform in-memory filtering for case-insensitive matching
+            filtered_products = []
+            for product in all_products:
+                product_name_value = product.get("product_name", "")
+                if product_name_value and search_term in product_name_value.lower():
+                    # Add the product to our filtered list
+                    filtered_products.append(product)
+            
+            # Sort products by relevance (items that have the search term closer to the beginning are more relevant)
+            if filtered_products:
+                filtered_products.sort(key=lambda x: x.get("product_name", "").lower().find(search_term))
+            
+            # Further sort by exact beginning matches first
+            exact_beginning_matches = []
+            other_matches = []
+            
+            for product in filtered_products:
+                product_name_value = product.get("product_name", "").lower()
+                if product_name_value.startswith(search_term):
+                    exact_beginning_matches.append(product)
+                else:
+                    other_matches.append(product)
+            
+            # Combine the results with exact beginning matches first
+            sorted_products = exact_beginning_matches + other_matches
+            
+            logger.info(f"Found {len(sorted_products)} products matching '{product_name}'")
+            return sorted_products
+        except Exception as e:
+            error_msg = f"Error searching for products by name: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg)

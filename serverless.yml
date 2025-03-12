@@ -162,6 +162,54 @@ functions:
       - httpApi:
           path: /inventory
           method: post
+  searchProductsByName:
+    handler: handlers/product_handler.search_products_by_name
+    events:
+      - httpApi:
+          path: /products/search
+          method: get
+          
+  buyProduct:
+    handler: handlers/product_handler.buy_product
+    events:
+      - httpApi:
+          path: /products/{product_id}/buy
+          method: post
+
+  buyProductByName:
+    handler: handlers/product_handler.buy_product
+    events:
+      - httpApi:
+          path: /products/buy
+          method: post
+          
+  checkStock:
+    handler: handlers/product_handler.check_stock
+    events:
+      - httpApi:
+          path: /products/{product_id}/stock
+          method: get
+          
+  checkStockByName:
+    handler: handlers/product_handler.check_stock
+    events:
+      - httpApi:
+          path: /products/stock
+          method: get
+          
+  verifyAdmin:
+    handler: handlers/product_handler.verify_admin
+    events:
+      - httpApi:
+          path: /admin/verify
+          method: post
+          
+  getSpecializedProducts:
+    handler: handlers/specialized_product_handler.get_specialized_products
+    events:
+      - httpApi:
+          path: /products/specialized
+          method: get
 
 resources:
   Resources:
